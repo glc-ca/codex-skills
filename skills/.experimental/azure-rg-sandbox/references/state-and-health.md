@@ -4,6 +4,13 @@
 
 - `.codex/azure-rg-sandbox/state.json`
 
+## `sandbox az` Init Precondition
+
+- `sandbox az ...` is execution-only and never auto-initializes.
+- The command requires `.codex/azure-rg-sandbox/state.json` in the current workspace.
+- If state is missing, `sandbox az` exits non-zero and prints plain text telling you to run:
+  - `sandbox az init --location <location>`
+
 ## State Schema (v1)
 
 ```json
@@ -48,10 +55,25 @@
 
 - Emit `healthy=false` when any check fails.
 - Include specific remediation hints in output.
-- Recommend `sandbox init --location <location> --recreate` for unrecoverable drift.
+- Recommend `sandbox az init --location <location> --recreate` for unrecoverable drift.
+
+## Codex Rule File Management
+
+- `sandbox az init` maintains a dedicated Codex rules file at:
+  - `~/.codex/rules/azure-rg-sandbox.rules`
+- Managed content is one wrapper prefix rule for the installed sandbox script path.
+- The skill does not modify:
+  - `~/.codex/rules/default.rules`
+- If the managed file is created or updated, the script prints a one-line note recommending a Codex restart so rule scanning fully applies.
 
 ## Known Azure Timing Behavior
 
 - New service principals and fresh RBAC assignments can take time to propagate.
 - During propagation, login may fail with messages like `No subscriptions found`.
-- `sandbox init` should retry sandbox service-principal login with backoff before concluding failure.
+- `sandbox az init` should retry sandbox service-principal login with backoff before concluding failure.
+
+## Known Entra Credential Behavior
+
+- If `az ad sp create-for-rbac` reuses an existing application/service principal by name, the returned `password` field may not always be usable for login.
+- `sandbox az init` should attempt login with the returned secret first.
+- On `AADSTS7000215` or equivalent invalid-secret failures during init, rotate credentials with `az ad app credential reset` and retry login before failing.
