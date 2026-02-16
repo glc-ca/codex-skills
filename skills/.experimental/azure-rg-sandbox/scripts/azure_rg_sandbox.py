@@ -6,6 +6,7 @@ azure-rg-sandbox: workspace-scoped Azure sandbox lifecycle tool.
 from __future__ import annotations
 
 import argparse
+import configparser
 import datetime as dt
 import hashlib
 import json
@@ -24,6 +25,8 @@ STATE_VERSION = 1
 SANDBOX_DIR_REL = Path(".codex/azure-rg-sandbox")
 STATE_FILE_NAME = "state.json"
 AZURE_CONFIG_DIR_NAME = "azure-config"
+AZURE_CONFIG_FILE_NAME = "config"
+AZURE_COMMAND_LOG_DIR_NAME = "commands"
 GITIGNORE_LINE = ".codex/azure-rg-sandbox/"
 CODEX_RULES_DIR = Path.home() / ".codex" / "rules"
 CODEX_RULE_FILE_NAME = "azure-rg-sandbox.rules"
@@ -31,6 +34,7 @@ LOGIN_RETRY_ATTEMPTS = 8
 LOGIN_RETRY_INITIAL_DELAY_SECONDS = 5
 LOGIN_RETRY_MAX_DELAY_SECONDS = 30
 SENSITIVE_FLAGS = {"--password", "-p", "--client-secret", "--secret"}
+CONFIG_FALSE_VALUES = {"0", "false", "no", "off"}
 
 REQUIRED_STATE_FIELDS = {
     "version": int,
@@ -146,6 +150,60 @@ def resolve_workspace_paths(workspace: Path | None = None) -> WorkspacePaths:
     )
 
 
+def config_value_is_false(value: str | None) -> bool:
+    if value is None:
+        return False
+    return value.strip().lower() in CONFIG_FALSE_VALUES
+
+
+def ensure_azure_cli_local_config(azure_config_dir: Path) -> None:
+    try:
+        ensure_directory(azure_config_dir, 0o700)
+        ensure_directory(azure_config_dir / AZURE_COMMAND_LOG_DIR_NAME, 0o700)
+
+        config_file = azure_config_dir / AZURE_CONFIG_FILE_NAME
+        parser = configparser.ConfigParser()
+        if config_file.exists():
+            parser.read(config_file, encoding="utf-8")
+
+        changed = False
+        if not parser.has_section("logging"):
+            parser.add_section("logging")
+            changed = True
+        if not config_value_is_false(parser.get("logging", "enable_log_file", fallback=None)):
+            parser.set("logging", "enable_log_file", "no")
+            changed = True
+
+        if not parser.has_section("core"):
+            parser.add_section("core")
+            changed = True
+        if not config_value_is_false(parser.get("core", "collect_telemetry", fallback=None)):
+            parser.set("core", "collect_telemetry", "no")
+            changed = True
+
+        if changed or not config_file.exists():
+            temp_file = config_file.with_suffix(".tmp")
+            with temp_file.open("w", encoding="utf-8") as handle:
+                parser.write(handle)
+            os.chmod(temp_file, 0o600)
+            temp_file.replace(config_file)
+            os.chmod(config_file, 0o600)
+    except OSError as exc:
+        raise CliError(
+            "Sandbox Azure config directory is not writable: "
+            f"{azure_config_dir}. Run this command from the target workspace so Codex "
+            "can write local auth/cache files there."
+        ) from exc
+
+
+def az_env(azure_config_dir: Path | None = None) -> dict[str, str]:
+    env = os.environ.copy()
+    if azure_config_dir is not None:
+        ensure_azure_cli_local_config(azure_config_dir)
+        env["AZURE_CONFIG_DIR"] = str(azure_config_dir)
+    return env
+
+
 def run_cmd(
     cmd: list[str],
     *,
@@ -171,9 +229,7 @@ def run_az(
     check: bool = True,
     capture_output: bool = True,
 ) -> subprocess.CompletedProcess[str]:
-    env = os.environ.copy()
-    if azure_config_dir is not None:
-        env["AZURE_CONFIG_DIR"] = str(azure_config_dir)
+    env = az_env(azure_config_dir)
     return run_cmd(["az", *args], env=env, check=check, capture_output=capture_output)
 
 
@@ -1072,8 +1128,7 @@ def cmd_az(args: argparse.Namespace) -> int:
     enforce_guardrails(args.az_args, state)
     ensure_sandbox_login(state, paths)
 
-    env = os.environ.copy()
-    env["AZURE_CONFIG_DIR"] = str(paths.azure_config_dir)
+    env = az_env(paths.azure_config_dir)
 
     result = subprocess.run(["az", *args.az_args], env=env)
     return result.returncode

@@ -3,6 +3,16 @@
 ## State File Location
 
 - `.codex/azure-rg-sandbox/state.json`
+- Azure CLI config/cache dir: `.codex/azure-rg-sandbox/azure-config`
+
+## Azure CLI Local Config Behavior
+
+- Before any Azure CLI call, the skill ensures the workspace-local Azure config dir exists and is writable.
+- It manages `.codex/azure-rg-sandbox/azure-config/config` with:
+  - `[logging] enable_log_file=no`
+  - `[core] collect_telemetry=no`
+- This prevents Azure CLI from writing per-command log files outside the workspace and reduces sandbox write prompts.
+- If the local Azure config dir is not writable in the current Codex session, commands fail early with a clear workspace-local remediation message.
 
 ## `sandbox az` Init Precondition
 
