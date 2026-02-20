@@ -11,6 +11,10 @@ This repo starts intentionally empty and is the source of truth for your team-ow
 
 Each skill should live in its own folder and include at least `SKILL.md`.
 
+## Sandbox Skill Status
+
+The codex sandbox skill (`skills/.experimental/azure-sandbox/`) is experimental and is not currently functioning.
+
 ## Install skills with `$skill-installer`
 
 Install directly from this repository by URL.
